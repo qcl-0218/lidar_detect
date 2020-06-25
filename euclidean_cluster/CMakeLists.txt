@@ -43,11 +43,10 @@ link_directories(${PCL_LIBRARY_DIRS})
 link_directories(${OpenCV_LIBRARY_DIRS})
 
 add_executable(${PROJECT_NAME}_node src/euclidean_cluster_node.cpp src/euclidean_cluster_core.cpp)
-
-
 target_link_libraries(${PROJECT_NAME}_node
   ${OpenCV_LIBRARIES}
   ${catkin_LIBRARIES}
   ${PCL_LIBRARIES}
 )
+add_dependencies(${PROJECT_NAME}_node  euclidean_cluster_gencpp)
 
