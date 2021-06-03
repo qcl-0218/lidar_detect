@@ -2,20 +2,19 @@
 
 EuClusterCore::EuClusterCore(ros::NodeHandle &nh, ros::NodeHandle &private_nh)
 {
-    seg_distance_ = {15, 25, 35}; //分割区间划分
+    seg_distance_ = {15, 25, 35}; //按照距离分割区间划分
     cluster_distance_ = {0.4, 0.8, 1.4, 1.8}; //各区间的聚类半径
-
     private_nh.param<std::string>("obj_pub",obj_pub_,"/detection/lidar_objects");
-    
-    std::string raw_points_topic = 
-    private_nh.param<std::string>("in_points","/pandar_points");
-
-    sub_point_cloud_     = nh.subscribe(raw_points_topic, 1, &EuClusterCore::point_cb, this);
-	pub_filtered_points_ = nh.advertise<sensor_msgs::PointCloud2>("/filtered_points", 1);
+    std::string raw_points_topic = private_nh.param<std::string>("in_points","/pandar_points");
+	
+    sub_point_cloud_     = nh.subscribe(raw_points_topic, 1, &EuClusterCore::point_cb, this);//point_cb
+    pub_filtered_points_ = nh.advertise<sensor_msgs::PointCloud2>("/filtered_points", 1);
     pub_bounding_boxs_   = nh.advertise<jsk_recognition_msgs::BoundingBoxArray>(obj_pub_, 1);
     pub_polygon_         = nh.advertise<euclidean_cluster::ObjectPolygonArray>("/objtect_polygon",1);
     pub_object_marker_   = nh.advertise<visualization_msgs::MarkerArray>("/object_marker",1);
-    
+    pub_min_dis_obj_     = nh.advertise<std_msgs::Float32>(private_nh.param<std::string>("min_dis_obj","/min_dis_obj"),1);
+    pub_offset_          = nh.advertise<std_msgs::Float32>(private_nh.param<std::string>("obj_offset","/obj_offset"),1);
+	
     private_nh.param<double>("x_max",x_max_,1.0);
     private_nh.param<double>("x_min",x_min_,1.0);
     private_nh.param<double>("y_max",y_max_,1.0);
@@ -27,6 +26,8 @@ EuClusterCore::EuClusterCore(ros::NodeHandle &nh, ros::NodeHandle &private_nh)
     private_nh.param<bool>("use_threshold_filter",use_threshold_filter_, false);
     private_nh.param<int> ("min_cluster_size",min_cluster_size_,20);
     private_nh.param<int> ("max_cluster_size",max_cluster_size_,500);
+
+    private_nh.param<bool>("is_min_dection_long",is_min_dection_long, true);
 
     regions_.resize(14);
     //regions_[0] = 4; regions_[1] = 5; regions_[2] = 4; regions_[3] = 5; regions_[4] = 4;
@@ -65,9 +66,9 @@ void EuClusterCore::clip_filter(const pcl::PointCloud<pcl::PointXYZ>::Ptr in,con
             indices.indices.push_back(i);
         }
         //去除车身附近点云
-        else if(in->points[i].x<2.0 && in->points[i].x>-1.2 && 
+  /*      else if(in->points[i].x<2.0 && in->points[i].x>-1.2 && 
                 in->points[i].y>-1.5 && in->points[i].y<1.5 )
-             indices.indices.push_back(i);
+             indices.indices.push_back(i);*/
              
     }
     cliper.setIndices(boost::make_shared<pcl::PointIndices>(indices));
@@ -132,8 +133,19 @@ jsk_recognition_msgs::BoundingBox EuClusterCore::getBbox(const pcl::PointCloud<p
     //障碍物中心
     bbox.pose.position.x= min_x + length/2;
     bbox.pose.position.y= min_y + width /2;
-    bbox.pose.position.z= min_z + height /2;
+    bbox.pose.position.z= min_z + height/2;
     
+    offset.data = bbox.pose.position.y;
+    pub_offset_.publish(offset);
+/*---------------------------------计算障碍物和雷达之间的距离-------------------------------------*/            
+//    std::cout << "前方障碍物x坐标:" << bbox.pose.position.x << "前方障碍物y坐标:" <<  bbox.pose.position.y << std::endl;
+    double x = bbox.pose.position.x * bbox.pose.position.x;
+    double y = bbox.pose.position.y * bbox.pose.position.y;
+    double z = bbox.pose.position.z * bbox.pose.position.z;
+    distance = sqrt(x+y+z);
+	dis_list.push_back(distance);
+    bbox.header = point_cloud_header_;
+    bbox_array_.boxes.push_back(bbox);
     return bbox;
 }
 
@@ -171,12 +183,14 @@ void EuClusterCore::setcluster(const pcl::PointCloud<pcl::PointXYZ>::Ptr in_orig
             bbox.pose.position.y = box.center.y;
             bbox.dimensions.x = box.size.width;
             bbox.dimensions.y = box.size.height;
+            
+            
+
             // set bounding box direction
             tf::Quaternion quat = tf::createQuaternionFromRPY(0.0, 0.0, box.angle * M_PI / 180);
             tf::quaternionTFToMsg(quat, bbox.pose.orientation);
+            
         }
-        bbox.header = point_cloud_header_;
-        bbox_array_.boxes.push_back(bbox);
     }
 
     if(pub_polygon_.getNumSubscribers())
@@ -331,11 +345,12 @@ void EuClusterCore::cluster_by_distance2(pcl::PointCloud<pcl::PointXYZ>::Ptr in_
        
 }
 
+//收到点云后的处理
 void EuClusterCore::point_cb(const sensor_msgs::PointCloud2ConstPtr &in_cloud_ptr)
 {
 	bbox_array_.boxes.clear();
-    marker_array_.markers.clear();
-    polygon_array_.polygons.clear();
+	marker_array_.markers.clear();
+	polygon_array_.polygons.clear();
 
 	point_cloud_header_ = in_cloud_ptr->header;
 	
@@ -366,9 +381,19 @@ void EuClusterCore::point_cb(const sensor_msgs::PointCloud2ConstPtr &in_cloud_pt
         pub_polygon_.publish(polygon_array_);
     }
 
+    
+
     if(bbox_array_.boxes.size())
     {
         bbox_array_.header = point_cloud_header_;
         pub_bounding_boxs_.publish(bbox_array_);
+        //if(is_min_dection_long)
+        {
+		    min_dis_object_.data =  *min_element(dis_list.begin(), dis_list.end());
+		    dis_list.clear();
+        }
     }
+    else
+        min_dis_object_.data = 2000.0;
+    pub_min_dis_obj_.publish(min_dis_object_);
 }

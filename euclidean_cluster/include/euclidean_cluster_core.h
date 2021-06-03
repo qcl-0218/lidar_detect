@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ros/ros.h>
+#include "std_msgs/Float32.h"
 #include <iostream>
 #include <algorithm>
 #include <pcl_conversions/pcl_conversions.h>
@@ -23,6 +24,7 @@
 
 #include <std_msgs/Header.h>
 #include <math.h>
+#include <vector>
 
 #include <jsk_recognition_msgs/BoundingBox.h>
 #include <jsk_recognition_msgs/BoundingBoxArray.h>
@@ -53,6 +55,24 @@ class EuClusterCore
 
 		std::string obj_pub_;
 		double y_max_,y_min_,x_min_,x_max_,z_min_,z_max_;
+		
+		
+		
+/*--------------------------------------------------------------*/
+        double min_dection_long;
+        double distance;
+		bool is_min_dection_long;
+		std_msgs::Float32 min_dis_object_;
+		std_msgs::Float32 offset;
+		
+		ros::Publisher pub_min_dis_obj_;
+		ros::Publisher pub_offset_;
+		
+		std::vector<double> dis_list;
+/*--------------------------------------------------------------*/
+
+
+
 		bool pose_estimation_;
 		bool use_threshold_filter_;
 		bool use_downsample_;
@@ -63,6 +83,8 @@ class EuClusterCore
 		ros::Publisher pub_bounding_boxs_;
 		ros::Publisher pub_polygon_;
 		ros::Publisher pub_object_marker_;
+		
+		
 
 		std::vector<double> seg_distance_, cluster_distance_; //分区方式1：区域分割以及各区域聚类半径
 		std::vector<int> regions_;//分区方式2
